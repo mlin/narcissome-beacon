@@ -29,7 +29,7 @@ let getbody path =
 let ok path exists =
   let%lwt (response,body) = getbody path
   Response.status response $hould # equal `OK
-  (body@"exists") $hould # equal (`String exists)
+  ((body@"response")@"exists") $hould # equal (`String exists)
   Lwt.return ()
 
 let tests =

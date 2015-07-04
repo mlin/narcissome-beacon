@@ -42,8 +42,8 @@ type config = {
   description : string
 }
 
-(* beacon request *)
-type request = {
+(* beacon query *)
+type query = {
   reference_bases : string;
   alternate_bases : string;
   chromosome : string;
@@ -52,8 +52,8 @@ type request = {
   dataset : string
 }
 
-(* parse beacon request from URI query string *)
-let parse_request uri =
+(* parse beacon query from URI query string *)
+let parse_query uri =
   let ms key = match Uri.get_query_param' uri key with
     | Some [str] when str <> "" -> str
     | _ -> invalid_arg ("invalid " ^ key)
@@ -70,30 +70,49 @@ let parse_request uri =
     dataset = os "dataset"
   }
 
+let query_json q =
+  let ans = JSON.of_assoc [
+    "alternateBases", `String q.alternate_bases;
+    "chromosome", `String q.chromosome;
+    "position", `Int q.position
+  ]
+  let o j (key,str) = if str = "" then j else j $+ (key,`String str)
+  List.fold_left o ans [
+    ("referenceBases",q.reference_bases);
+    ("reference",q.reference);
+    ("dataset",q.dataset)
+  ]
+
 (* serve /beacon/query. TODO rate limiting *)
-let beacon_query data uri =
+let beacon_query cfg data uri =
   try
-    let beacon_req = parse_request uri
+    let beacon_req = parse_query uri
     let exists =
       Data.query data
         beacon_req.chromosome
         beacon_req.position
         beacon_req.alternate_bases
         ?reference_bases:(if beacon_req.reference_bases <> "" then Some beacon_req.reference_bases else None)
-    let response =
-      JSON.of_assoc [
-        "exists", `String (match exists with `True -> "True" |
-                                             `False -> "False" |
-                                             `Null -> "Null" |
-                                             `Overlap -> "Overlap")
+    let response = JSON.of_assoc [
+        "beacon", `String cfg.id;
+        "query", query_json beacon_req;
+        "response", JSON.of_assoc [
+          "exists", `String (match exists with `True -> "True" |
+                                               `False -> "False" |
+                                               `Null -> "Null" |
+                                               `Overlap -> "Overlap")
+        ]
       ]
     Lwt.return (`OK, response)
   with
     | Invalid_argument msg ->
         let body = JSON.of_assoc [
-          "err", JSON.of_assoc [
-            "name", `String "bad_request";
-            "description", `String msg
+          "beacon", `String cfg.id;
+          "response", JSON.of_assoc [
+            "err", JSON.of_assoc [
+              "name", `String "bad_request";
+              "description", `String msg
+            ]
           ]
         ]
         Lwt.return (`Bad_request, body)
@@ -116,7 +135,7 @@ let dispatch cfg data conn req body =
     let uri = Request.uri req
     (* TODO ensure request has no body, kill connection o/w... *)
     match Uri.path uri with
-      | "/beacon/query" -> beacon_query data uri
+      | "/beacon/query" -> beacon_query cfg data uri
       | "/beacon/info" -> beacon_info cfg
       | _ -> Lwt.return (`Not_found, JSON.empty)
 
@@ -157,9 +176,12 @@ let server cfg data =
       with exn ->
         backtrace := Some (Printexc.get_backtrace ())
         let body = JSON.of_assoc [
-          "err", JSON.of_assoc [
-            "name", `String "internal_server_error";
-            "description", `String "internal server error"
+          "beacon", `String cfg.id;
+          "response", JSON.of_assoc [
+            "err", JSON.of_assoc [
+              "name", `String "internal_server_error";
+              "description", `String "internal server error"
+            ]
           ]
         ]
         Lwt.return (`Internal_server_error, body)
