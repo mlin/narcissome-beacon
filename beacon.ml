@@ -5,6 +5,8 @@ open Cohttp_lwt_unix
 open JSON.Operators
 open Batteries
 
+Printexc.record_backtrace true
+
 module Data = struct
   (* allele on a chromosome: ((position,alternateBases),referenceBases *)
   type allele = ((int*string)*(string Set.t))
@@ -18,7 +20,7 @@ module Data = struct
       (* binary search the allele array *)
       let pos_alt = (position,alternate_bases)
       let rec bs lo hi =
-        if lo >= hi then `Null
+        if lo >= hi then `False
         else
           let mid = lo + (hi-lo)/2
           let allele_pos_alt = fst (alleles.(mid))
@@ -34,7 +36,10 @@ module Data = struct
 
 (* server configuration *)
 type config = {
-  port : int
+  port : int;
+  id : string;
+  organization : string;
+  description : string
 }
 
 (* beacon request *)
@@ -65,7 +70,7 @@ let parse_request uri =
     dataset = os "dataset"
   }
 
-(* serve /beacon/query *)
+(* serve /beacon/query. TODO rate limiting *)
 let beacon_query data uri =
   try
     let beacon_req = parse_request uri
@@ -82,7 +87,7 @@ let beacon_query data uri =
                                              `Null -> "Null" |
                                              `Overlap -> "Overlap")
       ]
-    Server.respond_string ~status:`OK ~body:(JSON.to_string response) ()
+    Lwt.return (`OK, response)
   with
     | Invalid_argument msg ->
         let body = JSON.of_assoc [
@@ -91,33 +96,42 @@ let beacon_query data uri =
             "description", `String msg
           ]
         ]
-        Server.respond_string ~status:`Bad_request ~body:(JSON.to_string body) ()
+        Lwt.return (`Bad_request, body)
 
-(* cohttp server *)
-let server { port } data =
-  let callback conn req body =
+(* serve /beacon/info *)
+let beacon_info cfg =
+  let response = JSON.of_assoc [
+    "id", `String cfg.id;
+    "organization", `String cfg.organization;
+    "description", `String cfg.description;
+    "api", `String "v0.2"
+  ]
+  Lwt.return (`OK, response)
+
+(* route dispatcher *)
+let dispatch cfg data conn req body =
+  if Request.meth req <> `GET then
+    Lwt.return (`Method_not_allowed, JSON.empty)
+  else
     let uri = Request.uri req
-    if Request.meth req <> `GET then
-      Server.respond_string ~status:`Method_not_allowed ~body:"" ()
-    (* TODO check request body size, kill connection if too large... *)
-    else
-      try
-        match Uri.path uri with
-          | "/beacon/query" -> beacon_query data uri
-          (* TODO /beacon/info *)
-          | _ -> Server.respond_string ~status:`Not_found ~body:"" ()
+    (* TODO ensure request has no body, kill connection o/w... *)
+    match Uri.path uri with
+      | "/beacon/query" -> beacon_query data uri
+      | "/beacon/info" -> beacon_info cfg
+      | _ -> Lwt.return (`Not_found, JSON.empty)
+
+(* cohttp server. TODO: request-response logging *)
+let server cfg data =
+  let callback conn req body =    
+    let%lwt status, body =
+      try%lwt dispatch cfg data conn req body
       with exn ->
-        (* TODO log exn *)
         let body = JSON.of_assoc [
           "err", JSON.of_assoc [
             "name", `String "internal_server_error";
             "description", `String "internal server error"
           ]
         ]
-        Server.respond_string ~status:`Internal_server_error ~body:(JSON.to_string body) ()
-  Server.create ~mode:(`TCP (`Port port)) (Server.make ~callback ())
-
-(*
-    let headers = req |> Request.headers |> Header.to_string
-    let%lwt body = Cohttp_lwt_body.to_string body
-*)
+        Lwt.return (`Internal_server_error, body)
+    Server.respond_string ~status ~body:(JSON.to_string body) ()
+  Server.create ~mode:(`TCP (`Port cfg.port)) (Server.make ~callback ())

@@ -2,4 +2,11 @@ open Printf
 open Lwt
 open Batteries
 
-ignore (Lwt_main.run (Beacon.server { Beacon.port = 8000 } Map.empty))
+let cfg = {
+	Beacon.port = 8000;
+	id = "test";
+	organization = "test";
+	description = "test"
+}
+
+ignore (Lwt_main.run (Beacon.server cfg Map.empty))
