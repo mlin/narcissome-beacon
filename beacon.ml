@@ -1,9 +1,9 @@
-open Printf
+open Batteries
 open Lwt
 open Cohttp
 open Cohttp_lwt_unix
 open JSON.Operators
-open Batteries
+open Printf
 
 Printexc.record_backtrace true
 
@@ -120,12 +120,42 @@ let dispatch cfg data conn req body =
       | "/beacon/info" -> beacon_info cfg
       | _ -> Lwt.return (`Not_found, JSON.empty)
 
-(* cohttp server. TODO: request-response logging *)
+let pid = Unix.getpid ()
+let host = Unix.gethostname ()
+let timestamp () = int_of_float (Unix.gettimeofday() *. 1000.)
+let client_ip (flow,_) = match flow with
+  (* ref: https://github.com/mirage/ocaml-cohttp/commit/e015f79c89818f8bd598794f087b6c1df1fecc7e *)
+  | Conduit_lwt_unix.TCP { fd } ->
+      match Lwt_unix.getpeername fd with
+        | Lwt_unix.ADDR_INET (ia,_) -> Ipaddr.to_string (Ipaddr_unix.of_inet_addr ia)
+        | _ -> "unknown"
+  | _ -> "unknown"
+
+(* cohttp server. *)
 let server cfg data =
+  let req_counter = ref 0
   let callback conn req body =    
+    (* log request *)
+    let t0 = timestamp ()
+    let req_id = !req_counter
+    incr req_counter
+    let reqlog = JSON.of_assoc [
+      "time", `Int t0;
+      "host", `String host;
+      "pid", `Int pid;
+      "rid", `Int req_id;
+      "client", `String (client_ip conn);
+      "method", `String (Code.string_of_method (Request.meth req));
+      "path", `String (Uri.path_and_query (Request.uri req))
+    ]
+    (*printf "%s\n" (JSON.to_string reqlog)*)
+    let backtrace = ref None
+
+    (* dispatch request, catch and record any exceptions *)
     let%lwt status, body =
       try%lwt dispatch cfg data conn req body
       with exn ->
+        backtrace := Some (Printexc.get_backtrace ())
         let body = JSON.of_assoc [
           "err", JSON.of_assoc [
             "name", `String "internal_server_error";
@@ -133,5 +163,15 @@ let server cfg data =
           ]
         ]
         Lwt.return (`Internal_server_error, body)
+
+    (* log response *)
+    let reslog = List.fold_left ($+) reqlog [
+      "dur",`Int (timestamp() - t0);
+      "code", `Int (Code.code_of_status status);
+      "response", body
+    ]
+    let reslog = if !backtrace = None then reslog else reslog $+ ("backtrace",`String (Option.get !backtrace))
+    printf "%s\n" (JSON.to_string reslog)
+
     Server.respond_string ~status ~body:(JSON.to_string body) ()
   Server.create ~mode:(`TCP (`Port cfg.port)) (Server.make ~callback ())
