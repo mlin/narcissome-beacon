@@ -80,7 +80,8 @@ type config = {
   port : int;
   id : string;
   organization : string;
-  description : string
+  description : string;
+  catchall : string option
 }
 
 (* beacon query *)
@@ -144,7 +145,7 @@ let beacon_query cfg data uri =
                                              `Overlap -> "Overlap")
       ]
     ]
-    Lwt.return (`OK, response)
+    Lwt.return (`OK, None, response)
   with
     | Invalid_argument msg ->
         let body = JSON.of_assoc [
@@ -156,7 +157,7 @@ let beacon_query cfg data uri =
             ]
           ]
         ]
-        Lwt.return (`Bad_request, body)
+        Lwt.return (`Bad_request, None, body)
 
 (* serve /beacon/info *)
 let beacon_info_json cfg = JSON.of_assoc [
@@ -166,19 +167,31 @@ let beacon_info_json cfg = JSON.of_assoc [
   "api", `String "v0.2"
 ]
 let beacon_info cfg =
-  Lwt.return (`OK, beacon_info_json cfg)
+  Lwt.return (`OK, None, beacon_info_json cfg)
 
 (* route dispatcher *)
 let dispatch cfg data conn req body =
   if Request.meth req <> `GET then
-    Lwt.return (`Method_not_allowed, JSON.empty)
+    Lwt.return (`Method_not_allowed, None, JSON.empty)
   else
     let uri = Request.uri req
     (* TODO ensure request has no body, kill connection o/w... *)
     match Uri.path uri with
       | "/beacon/query" -> beacon_query cfg data uri
       | "/beacon/info" -> beacon_info cfg
-      | _ -> Lwt.return (`Not_found, JSON.empty)
+      | _ ->
+          let status, headers = 
+            if cfg.catchall = None then `Not_found, None
+            else `See_other, Some (Header.init_with "location" (Option.get cfg.catchall))
+          Lwt.return
+            status, headers, JSON.of_assoc [
+              "beacon", `String cfg.id;
+              "response", JSON.of_assoc [
+              "err", JSON.of_assoc [
+                "name", `String "not_found";
+                "description", `String "not found"
+              ]
+            ]]
 
 let pid = Unix.getpid ()
 let host = Unix.gethostname ()
@@ -212,7 +225,7 @@ let server cfg data =
     let backtrace = ref None
 
     (* dispatch request, catch and record any exceptions *)
-    let%lwt status, body =
+    let%lwt status, headers, body =
       try%lwt dispatch cfg data conn req body
       with exn ->
         backtrace := Some (Printexc.get_backtrace ())
@@ -225,7 +238,7 @@ let server cfg data =
             ]
           ]
         ]
-        Lwt.return (`Internal_server_error, body)
+        Lwt.return (`Internal_server_error, None, body)
 
     (* log response *)
     let reslog = List.fold_left ($+) reqlog [
@@ -236,7 +249,7 @@ let server cfg data =
     let reslog = if !backtrace = None then reslog else reslog $+ ("backtrace",`String (Option.get !backtrace))
     printf "%s\n" (JSON.to_string reslog); flush stdout
 
-    Server.respond_string ~status ~body:(JSON.to_string body) ()
+    Server.respond_string ?headers ~status ~body:(JSON.to_string body) ()
 
   let total_variants = Map.fold (fun ar c -> c + Array.length ar) data 0
   let startup_msg = JSON.of_assoc [

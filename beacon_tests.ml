@@ -73,7 +73,8 @@ let test_config = {
   Beacon.port = 8222;
   id = "test";
   organization = "test";
-  description = "test"
+  description = "test";
+  catchall = None
 }
 
 let test_data = Beacon.Data.load (IO.input_string test_vcf)

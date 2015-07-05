@@ -10,6 +10,7 @@ let port = opt ~l:"port" ~h:"server port (1953)" (StdOpt.int_option ~default:195
 let id = opt ~l:"id" ~h:"beacon ID (narcissome)" (StdOpt.str_option ~default:"narcissome" ())
 let organization = opt ~l:"org" ~h:"beacon organization (narcissus)" (StdOpt.str_option ~default:"narcissus" ())
 let description = opt ~l:"desc" ~h:"beacon description" (StdOpt.str_option ~default:"" ())
+let catchall = opt ~l:"catchall" ~h:"catch-all redirect URL instead of 404s" (StdOpt.str_option ())
 
 let cmd = OptParser.parse_argv opt_parser
 
@@ -21,7 +22,8 @@ let cfg = {
 	Beacon.port = Opt.get port;
 	id = Opt.get id;
 	organization = Opt.get organization;
-	description = Opt.get description
+	description = Opt.get description;
+	catchall = Opt.opt catchall
 }
 
 ignore (Lwt_main.run (Beacon.server cfg (Beacon.Data.load stdin)))
