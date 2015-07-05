@@ -40,6 +40,41 @@ module Data = struct
       bs 0 (Array.length alleles)
     with Not_found -> `Null
 
+  (* Load from a VCF stream. (only the first 5 columns are needed!) *)
+  let load input =
+    let data =
+      IO.lines_of input |> fold
+        fun d line ->
+          try
+            if String.length line = 0 || line.[0] = '#' then d
+            else
+              match String.nsplit line ~by:"\t" with
+                | chromosome :: position :: _ :: reference_bases :: alternates :: _ ->
+                    assert (chromosome <> "")
+                    let position = int_of_string position - 1
+                    try 
+                      let _ = String.index reference_bases ','
+                      failwith "multiple reference alleles!?"
+                    with Not_found -> ()
+                    let chrom_entry = try Map.find chromosome d with Not_found -> Map.empty
+
+                    let pos_entry =
+                      String.nsplit alternates ~by:"," |> List.fold_left
+                        fun pos_entry alternate_bases ->
+                          MultiPMap.add
+                            String.uppercase alternate_bases
+                            String.uppercase reference_bases
+                            pos_entry
+                        try Map.find position chrom_entry with Not_found -> MultiPMap.empty
+
+                    Map.add chromosome (Map.add position pos_entry chrom_entry) d
+                | _ -> failwith "invalid VCF line"
+          with exn ->
+            eprintf "%s\n" line
+            raise exn
+        Map.empty
+    ((Map.map (Array.of_enum % Map.enum) data):t)
+
 (* server configuration *)
 type config = {
   port : int;
@@ -150,7 +185,7 @@ let host = Unix.gethostname ()
 let timestamp () = int_of_float (Unix.gettimeofday() *. 1000.)
 let client_ip (flow,_) = match flow with
   (* ref: https://github.com/mirage/ocaml-cohttp/commit/e015f79c89818f8bd598794f087b6c1df1fecc7e *)
-  | Conduit_lwt_unix.TCP { fd } ->
+  | Conduit_lwt_unix.TCP { Conduit_lwt_unix.fd } ->
       match Lwt_unix.getpeername fd with
         | Lwt_unix.ADDR_INET (ia,_) -> Ipaddr.to_string (Ipaddr_unix.of_inet_addr ia)
         | _ -> "unknown"
