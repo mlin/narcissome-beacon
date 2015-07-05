@@ -16,8 +16,8 @@ let test_config = {
 }
 
 let test_data = [
-  "12", [| (112241765,"A"), Set.of_enum (List.enum ["G"]) |];
-  "1", [| (123456789,"G"), Set.of_enum (List.enum ["A";"AA"]); (123456789,"GG"), Set.of_enum (List.enum ["A";"AA"]) |];
+  "12", [| 112241765, MultiPMap.of_enum (List.enum ["A","G"]) |];
+  "1", [| 123456789, MultiPMap.of_enum (List.enum ["G","A";"G","AA";"GG","A";"GG","AA"]) |];
 ]
 
 let get path = Client.get (Uri.of_string (sprintf "http://localhost:%d%s" test_config.port path))
@@ -49,17 +49,14 @@ let tests =
 
   let%lwt _ = ok "/beacon/query?chromosome=12&position=112241765&alternateBases=A" "True"
   let%lwt _ = ok "/beacon/query?chromosome=12&position=112241765&alternateBases=A&referenceBases=G" "True"
-  let%lwt _ = ok "/beacon/query?chromosome=12&position=112241765&alternateBases=A&referenceBases=T" "False"
-  (* TODO should be Overlap? *)
-  let%lwt _ = ok "/beacon/query?chromosome=12&position=112241765&alternateBases=T" "False"
+  let%lwt _ = ok "/beacon/query?chromosome=12&position=112241765&alternateBases=A&referenceBases=T" "Overlap"
+  let%lwt _ = ok "/beacon/query?chromosome=12&position=112241765&alternateBases=T" "Overlap"
   let%lwt _ = ok "/beacon/query?chromosome=12&position=12345678&alternateBases=A" "False"
-  (* non-existent chromosome *)
   let%lwt _ = ok "/beacon/query?chromosome=10&position=112241765&alternateBases=A" "Null"
   let%lwt _ = ok "/beacon/query?chromosome=1&position=123456789&alternateBases=G" "True"
-  (* TODO should be Overlap? *)
-  let%lwt _ = ok "/beacon/query?chromosome=1&position=123456789&alternateBases=C" "False"
+  let%lwt _ = ok "/beacon/query?chromosome=1&position=123456789&alternateBases=C" "Overlap"
   let%lwt _ = ok "/beacon/query?chromosome=1&position=123456789&alternateBases=G&referenceBases=AA" "True"
-  let%lwt _ = ok "/beacon/query?chromosome=1&position=123456789&alternateBases=G&referenceBases=T" "False"
+  let%lwt _ = ok "/beacon/query?chromosome=1&position=123456789&alternateBases=G&referenceBases=T" "Overlap"
 
   Lwt.return ()
 

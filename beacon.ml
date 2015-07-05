@@ -8,29 +8,35 @@ open Printf
 Printexc.record_backtrace true
 
 module Data = struct
-  (* allele on a chromosome: ((position,alternateBases),referenceBases *)
-  type allele = ((int*string)*(string Set.t))
-  (* map chromosome to sorted allele array. sorting by position will facilitate
-     overlap lookups in the future *)
+  (* allele on a chromosome: (position,(alternateBases=*>referenceBases)) *)
+  type allele = (int*((string,string) MultiPMap.t))
+  (* map chromosome to sorted allele array. sorting by position facilitates overlap lookups *)
   type t = (string,allele array) Map.t
 
   let query ?reference_bases data chromosome position alternate_bases =
     try
       let alleles = Map.find chromosome data
       (* binary search the allele array *)
-      let pos_alt = (position,alternate_bases)
       let rec bs lo hi =
         if lo >= hi then `False
         else
           let mid = lo + (hi-lo)/2
-          let allele_pos_alt = fst (alleles.(mid))
-          if      allele_pos_alt < pos_alt then bs (mid+1) hi
-          else if allele_pos_alt > pos_alt then bs lo mid
+          let allele_pos = fst alleles.(mid)
+          if      allele_pos < position then bs (mid+1) hi
+          else if allele_pos > position then bs lo mid
           else
-            match reference_bases with
-              | Some dna when Set.mem dna (snd alleles.(mid)) -> `True
-              | None -> `True
-              | Some _ -> `False
+            (* we found an allele entry at this position, so the answer will be either
+               Overlap or True. (Currently we produce Overlap only for such exact
+               position matches.) It's True if there's a matching alternateBases and
+               (query referenceBases is unspecified, or query referenceBases is 
+                specified and matching an entry in data). *)
+            let allele_reference_bases = MultiPMap.find alternate_bases (snd alleles.(mid))
+            if Set.PSet.is_empty allele_reference_bases then `Overlap
+            else
+              match reference_bases with
+                | None -> `True
+                | Some dna when Set.PSet.mem dna allele_reference_bases -> `True
+                | _ -> `Overlap
       bs 0 (Array.length alleles)
     with Not_found -> `Null
 
@@ -94,15 +100,15 @@ let beacon_query cfg data uri =
         beacon_req.alternate_bases
         ?reference_bases:(if beacon_req.reference_bases <> "" then Some beacon_req.reference_bases else None)
     let response = JSON.of_assoc [
-        "beacon", `String cfg.id;
-        "query", query_json beacon_req;
-        "response", JSON.of_assoc [
-          "exists", `String (match exists with `True -> "True" |
-                                               `False -> "False" |
-                                               `Null -> "Null" |
-                                               `Overlap -> "Overlap")
-        ]
+      "beacon", `String cfg.id;
+      "query", query_json beacon_req;
+      "response", JSON.of_assoc [
+        "exists", `String (match exists with `True -> "True" |
+                                             `False -> "False" |
+                                             `Null -> "Null" |
+                                             `Overlap -> "Overlap")
       ]
+    ]
     Lwt.return (`OK, response)
   with
     | Invalid_argument msg ->
