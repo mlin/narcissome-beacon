@@ -159,14 +159,14 @@ let beacon_query cfg data uri =
         Lwt.return (`Bad_request, body)
 
 (* serve /beacon/info *)
+let beacon_info_json cfg = JSON.of_assoc [
+  "id", `String cfg.id;
+  "organization", `String cfg.organization;
+  "description", `String cfg.description;
+  "api", `String "v0.2"
+]
 let beacon_info cfg =
-  let response = JSON.of_assoc [
-    "id", `String cfg.id;
-    "organization", `String cfg.organization;
-    "description", `String cfg.description;
-    "api", `String "v0.2"
-  ]
-  Lwt.return (`OK, response)
+  Lwt.return (`OK, beacon_info_json cfg)
 
 (* route dispatcher *)
 let dispatch cfg data conn req body =
@@ -234,7 +234,17 @@ let server cfg data =
       "response", body
     ]
     let reslog = if !backtrace = None then reslog else reslog $+ ("backtrace",`String (Option.get !backtrace))
-    printf "%s\n" (JSON.to_string reslog)
+    printf "%s\n" (JSON.to_string reslog); flush stdout
 
     Server.respond_string ~status ~body:(JSON.to_string body) ()
+
+  let total_variants = Map.fold (fun ar c -> c + Array.length ar) data 0
+  let startup_msg = JSON.of_assoc [
+    "time", `Int (timestamp ());
+    "host", `String host;
+    "pid", `Int pid;
+    "info", beacon_info_json cfg;
+    "variant_counts", (`Object (Map.map (fun ar -> `Int (Array.length ar)) data)) $+ ("*",`Int total_variants)
+  ]
+  printf "%s\n" (JSON.to_string startup_msg); flush stdout
   Server.create ~mode:(`TCP (`Port cfg.port)) (Server.make ~callback ())
