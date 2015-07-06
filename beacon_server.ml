@@ -11,6 +11,8 @@ let id = opt ~l:"id" ~h:"beacon ID (narcissome)" (StdOpt.str_option ~default:"na
 let organization = opt ~l:"org" ~h:"beacon organization (narcissus)" (StdOpt.str_option ~default:"narcissus" ())
 let description = opt ~l:"desc" ~h:"beacon description" (StdOpt.str_option ~default:"" ())
 let catchall = opt ~l:"catchall" ~h:"catch-all redirect URL instead of 404s" (StdOpt.str_option ())
+let qps = opt ~l:"qps" ~h:"enable rate-limiting with this QPS" (StdOpt.float_option ~default:0.0 ())
+let backlog = opt ~l:"backlog" ~h:"maximum request backlog during rate-limiting (10)" (StdOpt.int_option ~default:10 ())
 
 let cmd = OptParser.parse_argv opt_parser
 
@@ -23,7 +25,9 @@ let cfg = {
 	id = Opt.get id;
 	organization = Opt.get organization;
 	description = Opt.get description;
-	catchall = Opt.opt catchall
+	catchall = Opt.opt catchall;
+	qps = Opt.get qps;
+	backlog = Opt.get backlog
 }
 
 ignore (Lwt_main.run (Beacon.server cfg (Beacon.Data.load stdin)))

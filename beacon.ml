@@ -81,7 +81,9 @@ type config = {
   id : string;
   organization : string;
   description : string;
-  catchall : string option
+  catchall : string option;
+  qps : float;
+  backlog : int
 }
 
 (* beacon query *)
@@ -125,9 +127,17 @@ let query_json q =
     ("dataset",q.dataset)
   ]
 
-(* serve /beacon/query. TODO rate limiting *)
+let query_rate_limiter = ref None
+
+(* serve /beacon/query. *)
 let beacon_query cfg data uri =
-  try
+  try%lwt
+    match !query_rate_limiter with
+      | None when cfg.qps > 0. -> query_rate_limiter := Some (RateLimiter.create cfg.qps cfg.backlog)
+      | _ -> ()
+    let%lwt _ = match !query_rate_limiter with
+      | Some rl -> RateLimiter.enter rl (* TODO: log the delay *)
+      | None -> return 0.
     let beacon_req = parse_query uri
     let exists =
       Data.query data
@@ -145,7 +155,7 @@ let beacon_query cfg data uri =
                                              `Overlap -> "Overlap")
       ]
     ]
-    Lwt.return (`OK, None, response)
+    return (`OK, None, response)
   with
     | Invalid_argument msg ->
         let body = JSON.of_assoc [
@@ -157,7 +167,18 @@ let beacon_query cfg data uri =
             ]
           ]
         ]
-        Lwt.return (`Bad_request, None, body)
+        return (`Bad_request, None, body)
+    | RateLimiter.Maxed ->
+        let body = JSON.of_assoc [
+          "beacon", `String cfg.id;
+          "response", JSON.of_assoc [
+            "err", JSON.of_assoc [
+              "name", `String "too_many_requests";
+              "description", `String "too many requests"
+            ]
+          ]
+        ]
+        return (`Too_many_requests, None, body)
 
 (* serve /beacon/info *)
 let beacon_info_json cfg = JSON.of_assoc [
@@ -167,12 +188,12 @@ let beacon_info_json cfg = JSON.of_assoc [
   "api", `String "v0.2"
 ]
 let beacon_info cfg =
-  Lwt.return (`OK, None, beacon_info_json cfg)
+  return (`OK, None, beacon_info_json cfg)
 
 (* route dispatcher *)
 let dispatch cfg data conn req body =
   if Request.meth req <> `GET then
-    Lwt.return (`Method_not_allowed, None, JSON.empty)
+    return (`Method_not_allowed, None, JSON.empty)
   else
     let uri = Request.uri req
     (* TODO ensure request has no body, kill connection o/w... *)
@@ -183,7 +204,7 @@ let dispatch cfg data conn req body =
           let status, headers = 
             if cfg.catchall = None then `Not_found, None
             else `See_other, Some (Header.init_with "location" (Option.get cfg.catchall))
-          Lwt.return
+          return
             status, headers, JSON.of_assoc [
               "beacon", `String cfg.id;
               "response", JSON.of_assoc [
@@ -228,7 +249,7 @@ let server cfg data =
     let%lwt status, headers, body =
       try%lwt dispatch cfg data conn req body
       with exn ->
-        backtrace := Some (Printexc.get_backtrace ())
+        backtrace := Some (sprintf "%s\n%s" (Printexc.to_string exn) (Printexc.get_backtrace ()))
         let body = JSON.of_assoc [
           "beacon", `String cfg.id;
           "response", JSON.of_assoc [
@@ -238,7 +259,7 @@ let server cfg data =
             ]
           ]
         ]
-        Lwt.return (`Internal_server_error, None, body)
+        return (`Internal_server_error, None, body)
 
     (* log response *)
     let reslog = List.fold_left ($+) reqlog [
@@ -256,6 +277,8 @@ let server cfg data =
     "time", `Int (timestamp ());
     "host", `String host;
     "pid", `Int pid;
+    "qps", `Float cfg.qps;
+    "backlog", `Int cfg.backlog;
     "info", beacon_info_json cfg;
     "variant_counts", (`Object (Map.map (fun ar -> `Int (Array.length ar)) data)) $+ ("*",`Int total_variants)
   ]

@@ -74,7 +74,9 @@ let test_config = {
   id = "test";
   organization = "test";
   description = "test";
-  catchall = None
+  catchall = None;
+  qps = 10.0;
+  backlog = 10
 }
 
 let test_data = Beacon.Data.load (IO.input_string test_vcf)
@@ -92,7 +94,7 @@ let ok path exists =
   ((body@"response")@"exists") $hould # equal (`String exists)
   Lwt.return ()
 
-let tests =
+let tests () =
   (* start the server *)
   Lwt.async (fun _ -> Beacon.server test_config test_data)
   let%lwt _ = Lwt_unix.sleep 0.1
@@ -109,17 +111,36 @@ let tests =
 
   let%lwt _ = ok "/beacon/query?chromosome=12&position=112241765&alternateBases=A" "True"
   let%lwt _ = ok "/beacon/query?chromosome=12&position=112241765&alternateBases=A&referenceBases=G" "True"
+  let%lwt _ = ok "/beacon/query?chromosome=1&position=4501982&alternateBases=CG" "True"
+  let%lwt _ = ok "/beacon/query?chromosome=10&position=123456789&alternateBases=G&referenceBases=AA" "True"
+  let%lwt _ = ok "/beacon/query?chromosome=10&position=123456789&alternateBases=G" "True"
+
   let%lwt _ = ok "/beacon/query?chromosome=12&position=112241765&alternateBases=A&referenceBases=T" "Overlap"
   let%lwt _ = ok "/beacon/query?chromosome=12&position=112241765&alternateBases=T" "Overlap"
-  let%lwt _ = ok "/beacon/query?chromosome=12&position=12345678&alternateBases=A" "False"
-  let%lwt _ = ok "/beacon/query?chromosome=1&position=4501982&alternateBases=CG" "True"
   let%lwt _ = ok "/beacon/query?chromosome=1&position=4501982&alternateBases=C" "Overlap"
-  let%lwt _ = ok "/beacon/query?chromosome=11&position=112241765&alternateBases=A" "Null"
-  let%lwt _ = ok "/beacon/query?chromosome=10&position=123456789&alternateBases=G" "True"
   let%lwt _ = ok "/beacon/query?chromosome=10&position=123456789&alternateBases=C" "Overlap"
-  let%lwt _ = ok "/beacon/query?chromosome=10&position=123456789&alternateBases=G&referenceBases=AA" "True"
   let%lwt _ = ok "/beacon/query?chromosome=10&position=123456789&alternateBases=G&referenceBases=T" "Overlap"
+
+  let%lwt _ = ok "/beacon/query?chromosome=12&position=12345678&alternateBases=A" "False"
+  let%lwt _ = ok "/beacon/query?chromosome=11&position=112241765&alternateBases=A" "Null"
+
+  (* rate limiting *)
+  let t0 = Unix.gettimeofday ()
+  let%lwt responses = List.of_enum (1 -- 12) |> Lwt_list.map_p (fun _ -> getbody "/beacon/query?chromosome=12&position=112241765&alternateBases=A")
+  let t1 = Unix.gettimeofday ()
+  (t1 -. t0) $hould # be # at # least 1.0
+  let accepted, rejected =
+    responses |> List.partition (function (rsp,_) when Response.status rsp = `OK -> true | _ -> false)
+  List.length accepted $hould # be # at # least 10
+  list rejected $houldn't # be # empty
+  rejected |> List.iter (function (rsp,_) -> Response.status rsp $hould # equal `Too_many_requests)
+
+  let%lwt _ = Lwt_unix.sleep 0.2
+  let t0 = Unix.gettimeofday ()
+  let%lwt _ = ok "/beacon/query?chromosome=12&position=112241765&alternateBases=A" "True"
+  let t1 = Unix.gettimeofday ()
+  (t1 -. t0) $hould # be # below 0.01
 
   Lwt.return ()
 
-Lwt_main.run tests
+Lwt_main.run (tests ())
