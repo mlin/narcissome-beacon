@@ -14,8 +14,8 @@ module Data = struct
 
   (* map chromosome to buckets of alleles. each bucket has [lo,hi) coordinates,
      the number of alleles in the bucket, and a Snappy-compressed, marshalled,
-     sorted (allele array). The compression scheme is just to reduce memory
-     usage. *)
+     sorted (allele array). The compression scheme reduces this sucker's memory
+     usage, so that I can run it on my micro instance. *)
   type t = (string,(int*int*int*string) array) Map.t
 
   let pickle x = Snappy.compress (Marshal.to_bytes x [])

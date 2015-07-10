@@ -16,7 +16,7 @@ exception Maxed
 let enter rl =
   let t = Unix.gettimeofday ()
   if t -. rl.last > (1.0 /. rl.qps) then
-    (* idle for long enough to release the thread immediately *)
+    (* no recent requests, so we can release the thread immediately *)
     rl.last <- t
     return 0.
   else if rl.backlog < rl.max_backlog then
