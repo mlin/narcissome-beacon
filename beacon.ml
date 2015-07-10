@@ -126,6 +126,7 @@ type config = {
   id : string;
   organization : string;
   description : string;
+  reference : string Set.t;
   catchall : string option;
   qps : float;
   backlog : int
@@ -184,6 +185,9 @@ let beacon_query cfg data uri =
       | Some rl -> RateLimiter.enter rl (* TODO: log the delay *)
       | None -> return 0.
     let beacon_req = parse_query uri
+    if beacon_req.dataset <> "" then invalid_arg "This beacon serves only the default dataset."
+    if beacon_req.reference <> "" && not (Set.mem beacon_req.reference cfg.reference) then
+      invalid_arg "unknown reference"
     let exists =
       Data.query data
         beacon_req.chromosome

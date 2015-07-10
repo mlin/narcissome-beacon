@@ -76,6 +76,7 @@ let test_config = {
   id = "test";
   organization = "test";
   description = "test";
+  reference = Set.add "GRCh37" Set.empty;
   catchall = None;
   qps = 10.0;
   backlog = 10
@@ -143,5 +144,7 @@ let tests () =
   (t1 -. t0) $hould # be # below 0.01
 
   Lwt.return ()
+
+ (* TODO: larger test with some NA12878 vcf *)
 
 Lwt_main.run (tests ())
