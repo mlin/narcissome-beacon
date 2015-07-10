@@ -9,7 +9,7 @@ Plugins:     DevFiles (0.4)
 Executable beacon_server
   Path:         .
   BuildTools:   ocamlbuild
-  BuildDepends: lwt,conduit,cohttp,cohttp.lwt,yajl-extra
+  BuildDepends: lwt,conduit,cohttp,cohttp.lwt,yajl-extra,snappy
   MainIs:       beacon_server.ml
   CompiledObject: best
   
@@ -17,7 +17,7 @@ Executable beacon_tests
   Path:         .
   Build$:       flag(tests)
   BuildTools:   ocamlbuild
-  BuildDepends: lwt,conduit,cohttp,cohttp.lwt,yajl-extra,should
+  BuildDepends: lwt,conduit,cohttp,cohttp.lwt,yajl-extra,snappy,should
   MainIs:       beacon_tests.ml
   CompiledObject: best
   

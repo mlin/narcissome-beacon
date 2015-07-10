@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: ec1dfe613f6ad6b0fde42c4b18078e82)
+# DO NOT EDIT (digest: 61e66c57096b9bba3d77ed3052e43cf5)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -19,6 +19,7 @@ true: annot, bin_annot
 <beacon_server.{native,byte}>: pkg_cohttp.lwt
 <beacon_server.{native,byte}>: pkg_conduit
 <beacon_server.{native,byte}>: pkg_lwt
+<beacon_server.{native,byte}>: pkg_snappy
 <beacon_server.{native,byte}>: pkg_yajl-extra
 # Executable beacon_tests
 <beacon_tests.{native,byte}>: pkg_cohttp
@@ -26,12 +27,14 @@ true: annot, bin_annot
 <beacon_tests.{native,byte}>: pkg_conduit
 <beacon_tests.{native,byte}>: pkg_lwt
 <beacon_tests.{native,byte}>: pkg_should
+<beacon_tests.{native,byte}>: pkg_snappy
 <beacon_tests.{native,byte}>: pkg_yajl-extra
 <*.ml{,i,y}>: pkg_cohttp
 <*.ml{,i,y}>: pkg_cohttp.lwt
 <*.ml{,i,y}>: pkg_conduit
 <*.ml{,i,y}>: pkg_lwt
 <*.ml{,i,y}>: pkg_should
+<*.ml{,i,y}>: pkg_snappy
 <*.ml{,i,y}>: pkg_yajl-extra
 # OASIS_STOP
 <*.ml{,i}>: pp(ocaml+twt), ppx(ppx_lwt)

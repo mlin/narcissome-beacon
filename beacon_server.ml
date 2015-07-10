@@ -13,6 +13,7 @@ let description = opt ~l:"desc" ~h:"beacon description" (StdOpt.str_option ~defa
 let catchall = opt ~l:"catchall" ~h:"catch-all redirect URL instead of 404s" (StdOpt.str_option ())
 let qps = opt ~l:"qps" ~h:"enable rate-limiting with this QPS" (StdOpt.float_option ~default:0.0 ())
 let backlog = opt ~l:"backlog" ~h:"maximum request backlog during rate-limiting (10)" (StdOpt.int_option ~default:10 ())
+let bucket = opt ~l:"bucket" ~h:"variants per bucket for in-memory compression (4000)" (StdOpt.int_option ~default:4000 ())
 
 let cmd = OptParser.parse_argv opt_parser
 
@@ -30,4 +31,7 @@ let cfg = {
 	backlog = Opt.get backlog
 }
 
-ignore (Lwt_main.run (Beacon.server cfg (Beacon.Data.load stdin)))
+let data = Beacon.Data.load (Opt.get bucket) stdin
+Gc.compact ()
+
+ignore (Lwt_main.run (Beacon.server cfg data))

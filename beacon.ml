@@ -8,72 +8,117 @@ open Printf
 Printexc.record_backtrace true
 
 module Data = struct
-  (* allele on a chromosome: (position,(alternateBases=*>referenceBases)) *)
-  type allele = (int*((string,string) MultiPMap.t))
-  (* map chromosome to sorted allele array. sorting by position facilitates overlap lookups *)
-  type t = (string,allele array) Map.t
+  (* allele on a chromosome: (position,alternateBases,referenceBases) *)
+  type allele = int*string*string
+  let allele_pos (pos,_,_) = pos
 
+  (* map chromosome to buckets of alleles. each bucket has [lo,hi) coordinates,
+     the number of alleles in the bucket, and a Snappy-compressed, marshalled,
+     sorted (allele array). The compression scheme is just to reduce memory
+     usage. *)
+  type t = (string,(int*int*int*string) array) Map.t
+
+  let pickle x = Snappy.compress (Marshal.to_bytes x [])
+  let unpickle buf = Marshal.from_bytes (Snappy.uncompress buf) 0
+
+  (* find & unpickle the bucket containing the given position *)
+  let get_bucket data chromosome position =
+    let alleles = Map.find chromosome data
+    (* TODO: alleles is a sorted array - do a binary search *)
+    let (_,_,n_alleles,buf) = alleles |> Array.find (fun (lo,hi,_,_) -> position >= lo && position < hi)
+    let ans = (unpickle buf:allele array)
+    assert (Array.length ans = n_alleles)
+    ans
+
+  (* serve a query, producing True, Overlap, False, or Null *)
   let query ?reference_bases data chromosome position alternate_bases =
-    try
-      let alleles = Map.find chromosome data
-      (* binary search the allele array *)
-      let rec bs lo hi =
-        if lo >= hi then `False
-        else
-          let mid = lo + (hi-lo)/2
-          let allele_pos = fst alleles.(mid)
-          if      allele_pos < position then bs (mid+1) hi
-          else if allele_pos > position then bs lo mid
+    if not (Map.mem chromosome data) then `Null
+    else
+      try
+        (* get the alleles array from the pertinent bucket *)
+        let alleles = get_bucket data chromosome position
+
+        (* binary search for the lowest index with the desired position *)
+        let rec bs lo hi =
+          if lo >= hi then raise Not_found
           else
-            (* we found an allele entry at this position, so the answer will be either
-               Overlap or True. (Currently we produce Overlap only for such exact
-               position matches.) It's True if there's a matching alternateBases and
-               (query referenceBases is unspecified, or query referenceBases is 
-                specified and matching an entry in data). *)
-            let allele_reference_bases = MultiPMap.find alternate_bases (snd alleles.(mid))
-            if Set.PSet.is_empty allele_reference_bases then `Overlap
-            else
-              match reference_bases with
-                | None -> `True
-                | Some dna when Set.PSet.mem dna allele_reference_bases -> `True
-                | _ -> `Overlap
-      bs 0 (Array.length alleles)
-    with Not_found -> `Null
+            let mid = lo + (hi-lo)/2
+            let mid_pos = allele_pos alleles.(mid)
+            if      mid_pos < position then bs (mid+1) hi
+            else if mid_pos > position || (mid>0 && mid_pos = allele_pos alleles.(mid-1)) then bs lo mid
+            else mid
 
-  (* Load from a VCF stream. (only the first 5 columns are needed!) *)
-  let load input =
-    let data =
-      IO.lines_of input |> fold
-        fun d line ->
-          try
-            if String.length line = 0 || line.[0] = '#' then d
-            else
-              match String.nsplit line ~by:"\t" with
-                | chromosome :: position :: _ :: reference_bases :: alternates :: _ ->
-                    assert (chromosome <> "")
-                    let position = int_of_string position - 1
-                    try 
-                      let _ = String.index reference_bases ','
-                      failwith "multiple reference alleles!?"
-                    with Not_found -> ()
-                    let chrom_entry = try Map.find chromosome d with Not_found -> Map.empty
+        (* we found an allele entry at this position, so the answer will be either
+           Overlap or True. (Currently we produce Overlap only for such exact
+           position matches.) It's True if there's a matching alternateBases and
+           (query referenceBases is unspecified, or query referenceBases is 
+            specified and matching an entry in data). *)
 
-                    let pos_entry =
-                      String.nsplit alternates ~by:"," |> List.fold_left
-                        fun pos_entry alternate_bases ->
-                          MultiPMap.add
-                            String.uppercase alternate_bases
-                            String.uppercase reference_bases
-                            pos_entry
-                        try Map.find position chrom_entry with Not_found -> MultiPMap.empty
+        (* linear search for a matching allele starting from the aforementioned index *)
+        let rec ls i =
+          if i >= Array.length alleles || allele_pos alleles.(i) <> position then `Overlap
+          else
+            let _, allele_alternate_bases, allele_reference_bases = alleles.(i)
+            if (alternate_bases = allele_alternate_bases &&
+                (reference_bases = None || Option.get reference_bases = allele_reference_bases)) then
+              `True
+            else ls (i+1)
 
-                    Map.add chromosome (Map.add position pos_entry chrom_entry) d
-                | _ -> failwith "invalid VCF line"
-          with exn ->
-            eprintf "%s\n" line
-            raise exn
-        Map.empty
-    ((Map.map (Array.of_enum % Map.enum) data):t)
+        ls (bs 0 (Array.length alleles))
+      with Not_found -> `False
+
+  let stride_enum n en =
+    Enum.from
+      fun () ->
+        let ans = Enum.take n en
+        if Enum.is_empty ans then raise Enum.No_more_elements else ans
+
+  (* Load data from a VCF stream. (only the first 5 columns are needed!) *)
+  let load variants_per_bucket input =
+    (* parse vcf *)
+    let vcf =
+      (IO.lines_of input
+        |> Enum.filter (fun line -> String.length line > 0 && line.[0] <> '#')
+        |> Enum.map
+            (fun line ->
+              try
+                (match String.nsplit line ~by:"\t" with
+                  | chromosome :: position :: _ :: reference_bases :: alternates :: _ ->
+                      chromosome, (int_of_string position - 1), reference_bases, alternates
+                  | _ -> failwith "")
+              with _ -> failwith ("Invalid VCF line: " ^ line)))
+
+    (* create one serialized bucket from an enumeration of sorted VCF lines from the same chromosome *)
+    let bucketize vcf_lines =
+      let last_pos = ref (-1)
+      let alleles =
+        vcf_lines |> Enum.map
+          fun (_,pos,reference_bases,alternates) ->
+            if (pos < !last_pos) then
+              failwith "VCF not sorted properly!"
+            last_pos := pos
+            List.enum
+              String.nsplit alternates ~by:"," |> List.map
+                fun alternate_bases -> (pos,String.uppercase alternate_bases,String.uppercase reference_bases)
+      let alleles = Enum.flatten alleles |> Array.of_enum
+      let n_alleles = Array.length alleles
+      let bucket_lo = match alleles.(0) with (pos,_,_) -> pos
+      let bucket_hi = match alleles.(n_alleles - 1) with (pos,_,_) -> pos+1
+      bucket_lo, bucket_hi, n_alleles, pickle alleles
+
+    (* make buckets from all the sorted VCF lines on one chromosome *)
+    let chromosome_buckets vcf_lines =
+      (vcf_lines
+        |> Enum.group (fun (_,pos,_,_) -> pos)
+        |> stride_enum variants_per_bucket
+        |> Enum.map Enum.flatten
+        |> fun en -> let chrom,_,_,_ = Option.(get (Enum.peek (get (Enum.peek en)))) in chrom, Array.of_enum (Enum.map bucketize en))
+
+    (* group the VCF lines by chromosome, and make the buckets for each group *)
+    (* TODO: ensure all lines for each chromosome are contiguous... *)
+    (Enum.group_by (fun (chrom1,_,_,_) (chrom2,_,_,_) -> chrom1 = chrom2) vcf
+      |> Enum.map chromosome_buckets
+      |> Map.of_enum)
 
 (* server configuration *)
 type config = {
@@ -226,7 +271,7 @@ let client_ip (flow,_) = match flow with
   | _ -> "unknown"
 
 (* cohttp server. *)
-let server cfg data =
+let server cfg (data:Data.t) =
   let req_counter = ref 0
   let callback conn req body =    
     (* log request *)
@@ -272,7 +317,9 @@ let server cfg data =
 
     Server.respond_string ?headers ~status ~body:(JSON.to_string body) ()
 
-  let total_variants = Map.fold (fun ar c -> c + Array.length ar) data 0
+  let num_variants_by_chrom = data |> Map.map (Array.fold_left (fun c (_,_,len,_) -> c + len) 0)
+  let total_variants = Map.fold (+) num_variants_by_chrom 0
+  let db_compressed_bytes = data |> Map.map (Array.fold_left (fun c (_,_,_,str) -> c + String.length str) 0) |> (fun mp -> Map.fold (+) mp 0)
   let startup_msg = JSON.of_assoc [
     "time", `Int (timestamp ());
     "host", `String host;
@@ -280,7 +327,8 @@ let server cfg data =
     "qps", `Float cfg.qps;
     "backlog", `Int cfg.backlog;
     "info", beacon_info_json cfg;
-    "variant_counts", (`Object (Map.map (fun ar -> `Int (Array.length ar)) data)) $+ ("*",`Int total_variants)
+    "variant_counts", (`Object (Map.map (fun n -> `Int n) num_variants_by_chrom)) $+ ("*",`Int total_variants);
+    "db_compressed_bytes", `Int db_compressed_bytes
   ]
   printf "%s\n" (JSON.to_string startup_msg); flush stdout
   Server.create ~mode:(`TCP (`Port cfg.port)) (Server.make ~callback ())
