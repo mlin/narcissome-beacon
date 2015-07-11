@@ -72,7 +72,8 @@ let test_vcf = {testvcf|##fileformat=VCFv4.1
 |testvcf}
 
 let test_config = {
-  Beacon.port = 8222;
+  Beacon.localhost = true;
+  port = 8222;
   id = "test";
   organization = "test";
   description = "test";
@@ -84,7 +85,7 @@ let test_config = {
 
 let test_data = Beacon.Data.load 1 (IO.input_string test_vcf)
 
-let get path = Client.get (Uri.of_string (sprintf "http://localhost:%d%s" test_config.port path))
+let get path = Client.get (Uri.of_string (sprintf "http://127.0.0.1:%d%s" test_config.Beacon.port path))
 let getbody path =
   let%lwt (response,body) = get path
   let%lwt body = Cohttp_lwt_body.to_string body
@@ -98,7 +99,12 @@ let ok path exists =
 
 let tests () =
   (* start the server *)
-  Lwt.async (fun _ -> Beacon.server test_config test_data)
+  Lwt.async
+    fun _ ->
+      try%lwt Beacon.server test_config test_data
+      with exn ->
+        eprintf "%s\n" (Printexc.to_string exn)
+        Lwt.fail exn
   let%lwt _ = Lwt_unix.sleep 0.1
 
   let%lwt (response,body) = get "/beacon"
