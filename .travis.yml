@@ -3,7 +3,7 @@ sudo: required
 install:
 - bash -e <(curl https://raw.githubusercontent.com/ocaml/ocaml-travisci-skeleton/master/.travis-ocaml.sh)
 - sudo apt-get install -y libsnappy-dev
-- opam install -y lwt conduit cohttp yajl-extra snappy ocaml+twt should
+- opam install -y lwt.2.4.8 conduit cohttp yajl-extra snappy ocaml+twt should
 script:
 - eval $(opam config env)
 - ./configure --enable-tests
