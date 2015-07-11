@@ -122,6 +122,7 @@ module Data = struct
 
 (* server configuration *)
 type config = {
+  localhost : bool;
   port : int;
   id : string;
   organization : string;
@@ -335,4 +336,16 @@ let server cfg (data:Data.t) =
     "db_compressed_bytes", `Int db_compressed_bytes
   ]
   printf "%s\n" (JSON.to_string startup_msg); flush stdout
-  Server.create ~timeout:(int_of_float (ceil (1.5 *. float cfg.backlog /. cfg.qps))) ~mode:(`TCP (`Port cfg.port)) (Server.make ~callback ())
+
+  let%lwt ctx =
+    if cfg.localhost then
+      let%lwt ctx' = Conduit_lwt_unix.init ~src:"127.0.0.1" ()
+      Lwt.return (Some (Cohttp_lwt_unix_net.init ~ctx:ctx' ()))
+    else
+      Lwt.return None
+
+  Server.create
+    ~timeout:(int_of_float (ceil (1.5 *. float cfg.backlog /. cfg.qps)))
+    ~mode:(`TCP (`Port cfg.port))
+    ?ctx
+    Server.make ~callback ()
