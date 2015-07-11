@@ -1,0 +1,20 @@
+language: c
+sudo: required
+install:
+- bash -e <(curl https://raw.githubusercontent.com/ocaml/ocaml-travisci-skeleton/master/.travis-ocaml.sh)
+- sudo apt-get install -y libsnappy-dev
+- opam install -y lwt conduit cohttp yajl-extra snappy ocaml+twt should
+script:
+- eval $(opam config env)
+- ./configure --enable-tests
+- make
+- ./beacon_tests.native
+env:
+- OCAML_VERSION=4.02
+deploy:
+  provider: releases
+  api_key:
+    secure: bBlydy/Nlu1rQoedWNJ1CUi7/wg3x60lutf/a/2LeC+ig6kZMvrOyuDK1c5KECdDWX5PZ2k7R9rxzzN30wG2jkFt+98qLjzzNvG2coZWRQZ3lAY/TUEZNhgtZy8JIo8VyUElIUgLqB6QG5Xp23RpjPineFZfzEAnOeGiBalXzCVR5Zghd8PceFqsmzr2uzoR592XJdQQHomXcX0Km+HBpjlF6QHOsK40hdmqCj4hYQAxFb+YnQbG1SZ5NbjKBWaVaEwnwUnjZfDUJqS8LsvO3Sxyq0pxLKLqem9HQ5qqLGBtrIOP0arW1hnQIcX/gUv8Oeihbkb0z64faAAzPBKjigl1TMbKxjurcCWaRkDxCLisgpVuE1uTZcveKOMuz9qlwJT/MffvEfWP0VgSpuBQ6/PpK9utYUBkAraq6sQEdRlW+8d+Dj5L9gvDEiHrSgE7q0hyiFim918AAmSGR0fc63g6mTWBXDwsQU8EDrPxqFto8kEs3NYpKlbe4u5wjgGkeupSeM7Dy19fks8t9bgTToK1lVJ+SKhhqdfn1IwzZYEDHUVLVgyaGkcE8FtkNqHCiGyb6KryVgj0zacu80XguArrW3O6tdcGbk6lF1Jpf66LXt2es5JOsyAswDz+6H4UPyPwesB99jJub9hSwRdFmrUOZ/UbpqwTGas3wmnc/J4=
+  file: _build/beacon_server.native
+  on:
+    repo: mlin/narcissome-beacon
