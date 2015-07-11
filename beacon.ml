@@ -335,4 +335,4 @@ let server cfg (data:Data.t) =
     "db_compressed_bytes", `Int db_compressed_bytes
   ]
   printf "%s\n" (JSON.to_string startup_msg); flush stdout
-  Server.create ~mode:(`TCP (`Port cfg.port)) (Server.make ~callback ())
+  Server.create ~timeout:(int_of_float (ceil (1.5 *. float cfg.backlog /. cfg.qps))) ~mode:(`TCP (`Port cfg.port)) (Server.make ~callback ())

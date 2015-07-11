@@ -98,7 +98,12 @@ let ok path exists =
 
 let tests () =
   (* start the server *)
-  Lwt.async (fun _ -> Beacon.server test_config test_data)
+  Lwt.async
+    fun _ ->
+      try%lwt Beacon.server test_config test_data
+      with exn ->
+        eprintf "%s\n" (Printexc.to_string exn)
+        Lwt.fail exn
   let%lwt _ = Lwt_unix.sleep 0.1
 
   let%lwt (response,body) = get "/beacon"
