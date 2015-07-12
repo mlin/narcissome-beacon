@@ -1,6 +1,6 @@
 # narcissome-beacon
 
-![travis-ci](https://travis-ci.org/mlin/narcissome-beacon.svg)
+<a href="https://travis-ci.org/mlin/narcissome-beacon"><img src="https://travis-ci.org/mlin/narcissome-beacon.svg"/></a>
 
 [Beacon Project](http://ga4gh.org/#/beacon)
 
