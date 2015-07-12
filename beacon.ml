@@ -311,11 +311,11 @@ let server cfg (data:Data.t) =
         ]
         return (`Internal_server_error, None, body)
     let headers = Header.add (Option.default (Header.init ()) headers) "content-type" "application/json"
+
     (* log response *)
     let reslog = List.fold_left ($+) reqlog [
       "dur",`Int (timestamp() - t0);
-      "code", `Int (Code.code_of_status status);
-      "response", body
+      "code", `Int (Code.code_of_status status)
     ]
     let reslog = if !backtrace = None then reslog else reslog $+ ("backtrace",`String (Option.get !backtrace))
     printf "%s\n" (JSON.to_string reslog); flush stdout
