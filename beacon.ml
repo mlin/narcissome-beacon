@@ -310,7 +310,7 @@ let server cfg (data:Data.t) =
           ]
         ]
         return (`Internal_server_error, None, body)
-
+    let headers = Header.add (Option.default (Header.init ()) headers) "content-type" "application/json"
     (* log response *)
     let reslog = List.fold_left ($+) reqlog [
       "dur",`Int (timestamp() - t0);
@@ -320,7 +320,7 @@ let server cfg (data:Data.t) =
     let reslog = if !backtrace = None then reslog else reslog $+ ("backtrace",`String (Option.get !backtrace))
     printf "%s\n" (JSON.to_string reslog); flush stdout
 
-    Server.respond_string ?headers ~status ~body:(JSON.to_string body) ()
+    Server.respond_string ~headers ~status ~body:(JSON.to_string body ^ "\n") ()
 
   let num_variants_by_chrom = data |> Map.map (Array.fold_left (fun c (_,_,len,_) -> c + len) 0)
   let total_variants = Map.fold (+) num_variants_by_chrom 0
